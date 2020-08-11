@@ -73,7 +73,7 @@ The main goal of this assignment is to understand the back-propagation algorithm
 
 # Remark from WWK on 11.08
 - complete the required functions __forward__, __backward__ and __decoder__ in the template. Inside the reference directory, there are many references pdf and illustrations to help with understanding AE and VAE
-- code insipired by the hints given and ![this implementation]https://github.com/kwj2104/Simple-Variational-Autoencoder.
+- code insipired by the hints given and ![this implementation](https://github.com/kwj2104/Simple-Variational-Autoencoder).
 - some calculations, formulas and VAE structure diagramm can be found under VAE.jpg, where params are related to the codes.
 - Important parts of VAE: KL-divergence involved in Loss function and gradient calculation.
 - Further work:
