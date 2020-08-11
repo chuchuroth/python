@@ -9,23 +9,40 @@ import scipy.io
 
 debug = False
 
+# input image height
 img_rows = 28
+# input image width
 img_cols = 20
+
+# load data and split it into single image
 ff = scipy.io.loadmat('data/frey_rawface.mat')
 ff = ff["ff"].T.reshape((-1, 1, img_rows, img_cols))
 ff = ff.astype('float32') / 255.
 print(ff.shape)
 
+# total dataset size
 n_samples = ff.shape[0]
 
+
+# network params
+# input size = 560 = 28*20
 input_size = 560
+# hidden layer = 256 (after encoder)
 hidden_size = 256
+# sampled latent layer
 latent_size = 16
+# standard deviation 方差
 std = 0.02
+# learning rate / step size
 learning_rate = 0.01
+# loss func: batch cross entropy
 loss_function = 'bce'  # mse or bce
 
 
+"""
+    1. mini batch training, weight update after every batch
+    2. return the batched data
+"""
 def get_minibatch(batch_size, idx=0, indices=None):
     start_idx = batch_size * idx
     end_idx = min(start_idx + batch_size, n_samples)
@@ -56,7 +73,9 @@ def dsigmoid(y):
 def dtanh(y):
     return 1 - y * y
 
-
+"""
+    1. for generation purpose, we generate random number based on normal-distribution with latent size
+"""
 def sample_unit_gaussian(latent_size):
     return np.random.standard_normal(size=(latent_size))
 
@@ -72,18 +91,23 @@ def drelu(y):
 
 
 # Initialization was done according to Kingma et al. 2014.
+
 # input to hidden weight
+
 # Wi = np.random.randn(hidden_size, input_size) * std
 Wi = np.random.uniform(-std, std, size=(hidden_size, input_size))
 Bi = np.random.uniform(-std, std, size=(hidden_size, 1))
 # Bi = np.random.randn(hidden_size, 1) * std
+
 # encoding weight (hidden to code mean)
+
 # Wm = np.random.randn(latent_size, hidden_size) * std
 Wm = np.random.uniform(-std, std, size=(latent_size, hidden_size))
 Bm = np.random.uniform(-std, std, size=(latent_size, 1))
 # Bm = np.random.randn(latent_size, 1) * std
 
 # weight mapping code to hidden
+
 # Wd = np.random.randn(hidden_size, latent_size) * std
 Wd = np.random.uniform(-std, std, size=(hidden_size, latent_size))
 Bd = np.random.uniform(-std, std, size=(hidden_size, 1))
@@ -94,7 +118,10 @@ Wo = np.random.uniform(-std, std, size=(input_size, hidden_size))
 Bo = np.random.uniform(-std, std, size=(input_size, 1))
 # Bo = np.random.randn(input_size, 1) * std
 
-
+"""
+    forward pass:
+    input->encoder_hidden->code->decoder-hidden->output
+"""
 def forward(input):
     if debug:
         print("input shape:", input.shape)
@@ -138,6 +165,8 @@ def forward(input):
     if debug:
         print("output shape: ", p.shape)
 
+
+
     activations = (h, z, dec, output, p)
 
     return loss, activations
@@ -145,6 +174,7 @@ def forward(input):
 
 def backward(input, activations, scale=True):
     # allocating the gradients for the weight matrice
+    # placeholder for weights and biases
     dWi = np.zeros_like(Wi)
     dWm = np.zeros_like(Wm)
     dWd = np.zeros_like(Wd)
@@ -154,11 +184,13 @@ def backward(input, activations, scale=True):
     dBd = np.zeros_like(Bd)
     dBo = np.zeros_like(Bo)
 
+    # choose batch size
     if input.ndim == 2:
         batch_size = input.shape[-1]
     else:
         batch_size = 1
 
+    # hidden1, code, hidden2, output, param before loss function
     h, z, dec, output, p = activations
 
     # backprop from (8) and (9) (if there is an additional activation function)
@@ -274,8 +306,7 @@ def train():
             dWi, dWm, dWd, dWo, dBi, dBm, dBd, dBo = gradients
 
             # perform parameter update with Adagrad
-            for param, dparam, mem in zip([Wi, Wm, Wd, Wo,
-                                           ],
+            for param, dparam, mem in zip([Wi, Wm, Wd, Wo,],
                                           [dWi, dWm, dWd, dWo, dBi, dBm, dBd, dBo],
                                           [mWi, mWm, mWd, mWo, mBi, mBm, mBd, mBo]):
                 mem += dparam * dparam
@@ -341,6 +372,9 @@ def grad_check():
     return
 
 
+"""
+for generation purpose, from latent to output
+"""
 def decode(z):
     dec = np.dot(Wd, z) + Bd
     dec = relu(dec)

@@ -120,38 +120,54 @@ def forward(input):
 
     # (1) linear
     # H = W_i \times input + Bi
+    h = np.dot(Wi,input)+Bi
 
     # (2) ReLU
     # H = ReLU(H)
+    h = ReLU(h)
 
     # (3) h > mu
     # Estimate the means of the latent distributions
     # mean = Wm \times H + Bm
+    mean = np.dot(Wm,h)+Bm
 
     # (4) h > log var
     # Estimate the (diagonal) variances of the latent distributions
     # logvar = Wv \times H + Bv
+    logvar = np.dot(Wv,h)+Bv
 
     # (5) sample the random variable z from means and variances (refer to the "reparameterization trick" to do this)
+    # eps is the random number needed to stay the same for backprop
+    eps = np.random.standard_normal(size=latent_size)
+    sample_z = mean+np.exp(logvar*0.5)*eps
+
 
     # (6) decode z
     # D = Wd \times z + Bd
+    d = np.dot(Wd,sample_z)+Bd
 
     # (7) relu
     # D = ReLU(D)
+    d = ReLU(d)
 
     # (8) dec to output
     # output = Wo \times D + Bo
+    output = np.dot(Wo,d)+Bo
 
     # # (9) dec to p(x)
     # and (10) reconstruction loss function (same as the
     if loss_function == 'bce':
-
         # BCE Loss
+        p = sigmoid(output)
+        loss = -np.sum(np.multiply(input, np.log(p)) + np.multiply(1 - input, np.log(1 - p)))
+        # KL Divergence
+        kl_div_loss = -0.5*np.sum(1+logvar-np.power(mean,2)-np.exp(logvar))
+        loss += kl_div_loss
 
     elif loss_function == 'mse':
-
         # MSE Loss
+        p = output
+        loss = np.sum(0.5 * (p - input) ** 2)
 
     # variational loss with KL Divergence between P(z|x) and U(0, 1)
 
@@ -162,6 +178,7 @@ def forward(input):
 
     # Store the activations for the backward pass
     # activations = ( ... )
+    activations = (eps,h,mean,logvar,z,d,output,p,)
 
     return loss, kl_div_loss, activations
 
@@ -169,10 +186,16 @@ def forward(input):
 def decode(z):
 
     # basically the decoding part in the forward pass: maaping z to p
-
     # o = W_d \times z + B_d
-
     # p = sigmoid(o) if bce or o if mse
+    dec = np.dot(Wd, z) + Bd
+    dec = relu(dec)
+    output = np.dot(Wo, dec) + Bo
+    if loss_function == 'bce':
+        p = sigmoid(output)
+
+    elif loss_function == 'mse':
+        p = output
 
     return p
 
@@ -193,7 +216,7 @@ def backward(input, activations, scale=True, alpha=1.0):
     batch_size = input.shape[-1]
     scaler = batch_size if scale else 1
 
-    eps, h, mean, logvar, z, dec, output, p, _, _ = activations
+    eps, h, mean, logvar, z, dec, output, p = activations
 
     # Perform your BACKWARD PASS (similar to the auto-encoder code)
 
@@ -205,9 +228,116 @@ def backward(input, activations, scale=True, alpha=1.0):
 
     # 2nd Note:
     # The z is a sample from the distribution P(z|x), this is backprop-able based on the reparameterization trick
-    # In order to do that, one random variable must stay the same between forward and backward passes.
+    # In order to do that, one random variable must stay the same between forward and backward passes.---->eps
 
     # The rest of the backward pass should be the same as the AE
+
+    # from loss to output
+    if loss_function == 'mse':
+        dl_dp = p - input
+
+        # I found that normalizing the loss and gradient by batch size makes learning more stable
+        if scale:
+            dl_dp = dl_dp / batch_size
+        dp_doutput = 1
+        dl_doutput = dl_dp*dp_doutput
+
+    elif loss_function == 'bce':
+        dl_dp = -1 * (input / p - (1 - input) / (1 - p))
+        dl_dp = dl_dp
+        if scale:
+            dl_dp = dl_dp / batch_size
+        dl_doutput = np.multiply(dl_dp, dsigmoid(p))
+
+    # from output to dec
+    dl_ddec = np.dot(Wo.T, dl_doutput)
+    dWo += np.dot(dl_doutput, dec.T)
+    if batch_size == 1:
+        dBo += dl_doutput
+    else:
+        dBo += np.sum(dl_doutput, axis=-1, keepdims=True)
+
+    # from dec to sample_z
+    # through relu 
+    dl_ddec = np.multiply(drelu(dec),dl_ddec)
+
+    dl_dz = np.dot(Wd.T, dl_ddec)
+    dWd += np.dot(dl_ddec, z.T)
+    if batch_size == 1:
+        dBd += dl_ddec
+    else:
+        dBd += np.sum(dl_ddec, axis=-1, keepdims=True)
+
+    ######################
+    # from sample_z to mean and logvar
+    ######################
+    dz_dmean = 1
+    dl_dmean = dl_dz
+    dz_dvar = eps*np.exp(logvar*0.5)*0.5
+    dl_dvar = np.dot(dz_dvar,dl_dz)
+
+    ######################
+    # from mean to h(before relu)
+    ######################
+    dl_dh = np.dot(Wm.T,dl_dmean)+np.dot(Wv.T,dl_dvar)
+
+    dWm += np.dot(dl_dmean,h.T)
+    dWv += np.dot(dl_dvar,h.T)
+    if batch_size == 1:
+        dBm += dl_dmean
+        dBv += dl_dvar
+    else:
+        dBm += np.sum(dl_dmean, axis=-1, keepdims=True)
+        dBv += np.sum(dl_dvar, axis=-1, keepdims=True)
+
+    ######################
+    # from h yo input
+    ######################
+    # through relu
+    dl_dh = np.multiply(drelu(h),dl_dh)
+
+    dWi += np.dot(dl_dh,input.T)
+    if batch_size == 1:
+        dBi += dl_dh
+    else:
+        dBi += np.sum(dl_dh,axis=-1,keepdims=True)
+
+    ######################
+    # Loss due to KL-Divergence
+    ######################
+    # KL Loss to logvar
+    dKL_dvar = -0.5*(1-np.exp(logvar))
+    if batch_size == 1:
+        dKL_dBv = dKL_dvar
+    else:
+        dKL_dBv = np.sum(dKL_dvar,axis=-1,keepdims=True)
+    dKL_dWv = np.matmul(np.expand_dims(h),axis=-1,np.expand_dims(dKL_dvar,axis=-1))
+
+    # kl loss to mean
+    dKL_dmean = mean
+    if batch_size == 1:
+        dKL_dBm = dKL_dmean
+    else:
+        dKL_dBm = np.sum(dKL_dmean,axis=-1,keepdims=True)
+    dKL_dWm = np.matmul(np.expand_dims(h),axis=-1,np.expand_dims(dKL_dmean,axis=-1))
+
+    # kl loss to input
+    dKL_dh = np.dot(Wm.T,dKL_dmean)+np.dot(Wv.T,dKL_dvar)
+    # through relu
+    dKL_dh = np.multiply(drelu(h),dKL_dh)
+    if batch_size == 1:
+        dKL_dBi = dKL_dh
+    else:
+        dKL_dBi = np.sum(dKL_dh,axis=-1,keepdims=True)
+    dKL_dWi = np.matmul(np.expand_dims(input),axis=-1,np.expand_dims(dKL_dh,axis=-1))
+    
+    # KL update gradient
+    dWv += dKL_dWv
+    dWi += dKL_dWi
+    dWm += dKL_dWm
+    dBv += dKL_dBv
+    dBm += dKL_dBm
+    dBi += dKL_dBi
 
     gradients = (dWi, dWm, dWv, dWd, dWo, dBi, dBm, dBv, dBd, dBo)
 
