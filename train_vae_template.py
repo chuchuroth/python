@@ -252,6 +252,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dl_doutput = np.multiply(dl_dp, dsigmoid(p))
 
     # from output to dec
+    # or dl_ddec = Wo.T.dot(dl_doutput)
     dl_ddec = np.dot(Wo.T, dl_doutput)
     dWo += np.dot(dl_doutput, dec.T)
     if batch_size == 1:
@@ -261,7 +262,7 @@ def backward(input, activations, scale=True, alpha=1.0):
 
     # from dec to sample_z
     # through relu 
-    dl_ddec = np.multiply(drelu(dec),dl_ddec)
+    dl_ddec = np.multiply(dl_ddec,drelu(dec))
 
     dl_dz = np.dot(Wd.T, dl_ddec)
     dWd += np.dot(dl_ddec, z.T)
@@ -275,8 +276,7 @@ def backward(input, activations, scale=True, alpha=1.0):
     ######################
     dz_dmean = 1
     dl_dmean = dl_dz
-    dz_dvar = np.dot(eps.T,np.exp(logvar*0.5)*0.5)
-    dl_dvar = np.dot(dz_dvar.T,dl_dz)
+    dl_dvar = np.multiply(dl_dz,np.dot(eps.T,np.exp(logvar*0.5))*0.5)
 
     ######################
     # from mean to h(before relu)
@@ -296,7 +296,7 @@ def backward(input, activations, scale=True, alpha=1.0):
     # from h yo input
     ######################
     # through relu
-    dl_dh = np.multiply(drelu(h),dl_dh)
+    dl_dh = np.multiply(dl_dh,drelu(h))
 
     dWi += np.dot(dl_dh,input.T)
     if batch_size == 1:
@@ -308,12 +308,12 @@ def backward(input, activations, scale=True, alpha=1.0):
     # Loss due to KL-Divergence
     ######################
     # KL Loss to logvar
-    dKL_dvar = -0.5*(1-np.exp(logvar))
+    dKL_dvar = -0.5*(np.ones_like(logvar)-np.exp(logvar))
     if batch_size == 1:
         dKL_dBv = dKL_dvar
     else:
         dKL_dBv = np.sum(dKL_dvar,axis=-1,keepdims=True)
-    dKL_dWv = np.matmul(np.expand_dims(h,axis=-1),np.expand_dims(dKL_dvar,axis=-1))
+    dKL_dWv = np.dot(dKL_dvar,h.T)
 
     # kl loss to mean
     dKL_dmean = mean
@@ -321,7 +321,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dKL_dBm = dKL_dmean
     else:
         dKL_dBm = np.sum(dKL_dmean,axis=-1,keepdims=True)
-    dKL_dWm = np.matmul(np.expand_dims(h,axis=-1),np.expand_dims(dKL_dmean,axis=-1))
+    dKL_dWm = np.dot(dKL_dmean,h.T)
 
     # kl loss to input
     dKL_dh = np.dot(Wm.T,dKL_dmean)+np.dot(Wv.T,dKL_dvar)
@@ -331,7 +331,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dKL_dBi = dKL_dh
     else:
         dKL_dBi = np.sum(dKL_dh,axis=-1,keepdims=True)
-    dKL_dWi = np.matmul(np.expand_dims(input,axis=-1),np.expand_dims(dKL_dh,axis=-1))
+    dKL_dWi = np.dot(dKL_dh,input.T)
     
     # KL update gradient
     dWv += dKL_dWv
@@ -376,7 +376,7 @@ def train():
         return
 
     batch_size = 128
-    n_epoch = 100000
+    n_epoch = 2000 # origin 100000
 
     save_every = 2000
 
@@ -534,18 +534,25 @@ def sample():
     while True:
         cmd = input("Press anything to continue:  ")
 
-        z = np.random.randn(latent_size)
-        z = np.expand_dims(z, 1)
+        sample_number = 10
+        z_set = []
+        for i in range(sample_number):
+            z = np.random.randn(latent_size)
+            z = np.expand_dims(z, 1)
+            z_set.append(z)
 
+        img_set = []
         # The decode function should be implemented before this
-        p = decode(z)
-        img = p
+        for i in range(sample_number):
+            p = decode(z_set[i])
+            img_set.append(p)
 
-        fig = plt.figure(figsize=(2, 2))
+        fig = plt.figure(figsize=(14,10))
         # gs = gridspec.GridSpec(4, 4)
         # gs.update(wspace=0.05, hspace=0.05)
-
-        plt.imshow(img.reshape(28, 20), cmap='gray')
+        for i in range(1,sample_number+1):
+            fig.add_subplot(5,2,i)
+            plt.imshow(img_set[i-1].reshape(28, 20), cmap='gray')
         # plt.title('reconstructed face %d' % 0)
         plt.show(block=True)
 

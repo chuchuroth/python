@@ -79,3 +79,10 @@ The main goal of this assignment is to understand the back-propagation algorithm
 - Further work:
   - test with data
   - try fix matrix dimension problem
+
+# Remark from WWK on 20.08
+- Fixed Matrix Multiplication problem
+- Changed Epoch from 100000 to 2000, so that training can be alittle faster
+- Changed Sample method from 1 image to 10 image, results can be seen in Pics Directory
+- Basic Idea of Matrix Mutipliation can be seen from CS231 ppt, which is located in reference directory
+- My calculation of Gradients can also be seen in reference directory
