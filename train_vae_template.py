@@ -124,7 +124,7 @@ def forward(input):
 
     # (2) ReLU
     # H = ReLU(H)
-    h = ReLU(h)
+    h = relu(h)
 
     # (3) h > mu
     # Estimate the means of the latent distributions
@@ -139,7 +139,7 @@ def forward(input):
     # (5) sample the random variable z from means and variances (refer to the "reparameterization trick" to do this)
     # eps is the random number needed to stay the same for backprop
     eps = np.random.standard_normal(size=latent_size)
-    sample_z = mean+np.exp(logvar*0.5)*eps
+    sample_z = mean+np.dot(eps.T,np.exp(logvar*0.5))
 
 
     # (6) decode z
@@ -148,7 +148,7 @@ def forward(input):
 
     # (7) relu
     # D = ReLU(D)
-    d = ReLU(d)
+    d = relu(d)
 
     # (8) dec to output
     # output = Wo \times D + Bo
@@ -159,16 +159,18 @@ def forward(input):
     if loss_function == 'bce':
         # BCE Loss
         p = sigmoid(output)
-        loss = -np.sum(np.multiply(input, np.log(p)) + np.multiply(1 - input, np.log(1 - p)))
+        rec_loss = -np.sum(np.multiply(input, np.log(p)) + np.multiply(1 - input, np.log(1 - p)))
         # KL Divergence
         kl_div_loss = -0.5*np.sum(1+logvar-np.power(mean,2)-np.exp(logvar))
-        loss += kl_div_loss
+
 
     elif loss_function == 'mse':
         # MSE Loss
         p = output
-        loss = np.sum(0.5 * (p - input) ** 2)
+        rec_loss = np.sum(0.5 * (p - input) ** 2)
+        kl_div_loss = 0
 
+    loss = rec_loss + kl_div_loss
     # variational loss with KL Divergence between P(z|x) and U(0, 1)
 
     #kl_div_loss = - 0.5 * (1 + logvar - mean^2 - e^logvar)
@@ -178,9 +180,9 @@ def forward(input):
 
     # Store the activations for the backward pass
     # activations = ( ... )
-    activations = (eps,h,mean,logvar,z,d,output,p,)
+    activations = (eps,h,mean,logvar,sample_z,d,output,p,rec_loss,kl_div_loss)
 
-    return loss, kl_div_loss, activations
+    return loss, activations
 
 
 def decode(z):
@@ -216,7 +218,7 @@ def backward(input, activations, scale=True, alpha=1.0):
     batch_size = input.shape[-1]
     scaler = batch_size if scale else 1
 
-    eps, h, mean, logvar, z, dec, output, p = activations
+    eps, h, mean, logvar, z, dec, output, p ,_,_ = activations
 
     # Perform your BACKWARD PASS (similar to the auto-encoder code)
 
@@ -240,7 +242,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         if scale:
             dl_dp = dl_dp / batch_size
         dp_doutput = 1
-        dl_doutput = dl_dp*dp_doutput
+        dl_doutput = np.multiply(dl_dp,dp_doutput)
 
     elif loss_function == 'bce':
         dl_dp = -1 * (input / p - (1 - input) / (1 - p))
@@ -273,8 +275,8 @@ def backward(input, activations, scale=True, alpha=1.0):
     ######################
     dz_dmean = 1
     dl_dmean = dl_dz
-    dz_dvar = eps*np.exp(logvar*0.5)*0.5
-    dl_dvar = np.dot(dz_dvar,dl_dz)
+    dz_dvar = np.dot(eps.T,np.exp(logvar*0.5)*0.5)
+    dl_dvar = np.dot(dz_dvar.T,dl_dz)
 
     ######################
     # from mean to h(before relu)
@@ -311,7 +313,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dKL_dBv = dKL_dvar
     else:
         dKL_dBv = np.sum(dKL_dvar,axis=-1,keepdims=True)
-    dKL_dWv = np.matmul(np.expand_dims(h),axis=-1,np.expand_dims(dKL_dvar,axis=-1))
+    dKL_dWv = np.matmul(np.expand_dims(h,axis=-1),np.expand_dims(dKL_dvar,axis=-1))
 
     # kl loss to mean
     dKL_dmean = mean
@@ -319,7 +321,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dKL_dBm = dKL_dmean
     else:
         dKL_dBm = np.sum(dKL_dmean,axis=-1,keepdims=True)
-    dKL_dWm = np.matmul(np.expand_dims(h),axis=-1,np.expand_dims(dKL_dmean,axis=-1))
+    dKL_dWm = np.matmul(np.expand_dims(h,axis=-1),np.expand_dims(dKL_dmean,axis=-1))
 
     # kl loss to input
     dKL_dh = np.dot(Wm.T,dKL_dmean)+np.dot(Wv.T,dKL_dvar)
@@ -329,7 +331,7 @@ def backward(input, activations, scale=True, alpha=1.0):
         dKL_dBi = dKL_dh
     else:
         dKL_dBi = np.sum(dKL_dh,axis=-1,keepdims=True)
-    dKL_dWi = np.matmul(np.expand_dims(input),axis=-1,np.expand_dims(dKL_dh,axis=-1))
+    dKL_dWi = np.matmul(np.expand_dims(input,axis=-1),np.expand_dims(dKL_dh,axis=-1))
     
     # KL update gradient
     dWv += dKL_dWv
@@ -398,7 +400,7 @@ def train():
             x_i = get_minibatch(batch_size, i, rand_indices)
             bsz = x_i.shape[-1]
 
-            loss, acts = forward(x_i, alpha=alpha)
+            loss, acts = forward(x_i)
             _, _, _, _, z, _, _, _, rec_loss, kl_loss = acts
             # lol I computed kl_div again here
 
